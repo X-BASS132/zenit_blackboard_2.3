@@ -1,0 +1,2109 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ZENIT — Digital Blackboard</title>
+<!-- KaTeX para renderizado matemático profesional -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<!-- jsPDF para exportar toda la presentación a PDF -->
+<script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<style>
+  :root {
+    --bg-board: #14221d;
+    --panel-bg: rgba(18, 25, 23, 0.94);
+    --panel-border: rgba(255, 255, 255, 0.14);
+    --btn-bg: rgba(255, 255, 255, 0.06);
+    --btn-hover: rgba(255, 255, 255, 0.15);
+    --accent: #38bdf8;
+    --accent-glow: rgba(56, 189, 248, 0.35);
+    --text: #f1f5f9;
+    --muted: #94a3b8;
+    --shadow: 0 12px 32px rgba(0, 0, 0, 0.48);
+  }
+
+  * {
+    box-sizing: border-box;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  html, body {
+    height: 100%;
+    margin: 0;
+    font-family: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    background: #0d1210;
+    color: var(--text);
+    overflow: hidden;
+  }
+
+  #app {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .workspace {
+    position: relative;
+    flex: 1;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: var(--bg-board);
+  }
+
+  #board {
+    width: 100%;
+    height: 100%;
+    display: block;
+    touch-action: none;
+    cursor: crosshair;
+  }
+
+  /* Puntero láser visual */
+  #laserDot {
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #ff2a55;
+    box-shadow: 0 0 10px #ff2a55, 0 0 24px #ff2a55, 0 0 40px #ff0033;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    display: none;
+    z-index: 30;
+  }
+
+  /* Cortina / Telón de enfoque */
+  #curtainOverlay {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 45%;
+    background: linear-gradient(180deg, #0f172a 0%, #090d16 100%);
+    border-top: 3px solid var(--accent);
+    box-shadow: 0 -10px 30px rgba(0,0,0,0.65);
+    display: none;
+    z-index: 8;
+  }
+
+  #curtainHandle {
+    position: absolute;
+    top: -16px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--accent);
+    color: #06121e;
+    font-weight: 800;
+    font-size: 11px;
+    padding: 4px 16px;
+    border-radius: 99px;
+    cursor: ns-resize;
+    box-shadow: 0 4px 14px var(--accent-glow);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  /* Temporizador Flotante */
+  #timerWidget {
+    position: absolute;
+    top: 72px;
+    left: 16px;
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    backdrop-filter: blur(16px);
+    padding: 8px 12px;
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+    display: none;
+    align-items: center;
+    gap: 8px;
+    z-index: 12;
+  }
+
+  #timerDisplay {
+    font-family: monospace;
+    font-size: 18px;
+    font-weight: 800;
+    color: var(--accent);
+    min-width: 60px;
+    text-align: center;
+  }
+
+  /* Modo Presentación (oculta paneles) */
+  body.presentation-mode .dock-right,
+  body.presentation-mode .dock-bottom,
+  body.presentation-mode .hud-hideable {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  /* HUD Superior Flotante */
+  .hud-top {
+    position: absolute;
+    top: 14px;
+    left: 16px;
+    right: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    pointer-events: none;
+    z-index: 15;
+    gap: 10px;
+  }
+
+  .hud-pill {
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    padding: 6px 10px;
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+    transition: opacity 0.2s ease;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-weight: 800;
+    font-size: 14px;
+    letter-spacing: 1.8px;
+    text-transform: uppercase;
+    padding-right: 4px;
+  }
+
+  .brand svg {
+    width: 18px;
+    height: 18px;
+    stroke: var(--accent);
+    fill: none;
+    stroke-width: 2.2;
+    filter: drop-shadow(0 0 6px var(--accent-glow));
+  }
+
+  .brand span { color: var(--accent); }
+
+  button, select {
+    font: inherit;
+    color: var(--text);
+    background: var(--btn-bg);
+    border: 1px solid transparent;
+    border-radius: 10px;
+    padding: 6px 9px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    transition: all 0.16s ease;
+  }
+
+  button:hover, select:hover {
+    background: var(--btn-hover);
+    border-color: rgba(255, 255, 255, 0.18);
+  }
+
+  button:active { transform: scale(0.96); }
+
+  button.active {
+    background: var(--accent);
+    color: #06121e;
+    font-weight: 700;
+    box-shadow: 0 0 16px var(--accent-glow);
+  }
+
+  button:disabled {
+    opacity: 0.35;
+    pointer-events: none;
+  }
+
+  button svg {
+    width: 17px;
+    height: 17px;
+    stroke: currentColor;
+    fill: none;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  /* Menú desplegable negro con letras blancas */
+  select {
+    padding: 6px 10px;
+    font-size: 12px;
+    outline: none;
+    background-color: #000000;
+    color: #ffffff;
+    border-color: rgba(255, 255, 255, 0.25);
+  }
+
+  select option {
+    background-color: #000000;
+    color: #ffffff;
+  }
+
+  .sep {
+    width: 1px;
+    height: 20px;
+    background: var(--panel-border);
+    margin: 0 2px;
+  }
+
+  /* Dock Flotante Derecho */
+  .dock-right {
+    position: absolute;
+    right: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    padding: 9px 7px;
+    border-radius: 18px;
+    box-shadow: var(--shadow);
+    z-index: 15;
+    max-height: calc(100vh - 130px);
+    overflow-y: auto;
+    transition: opacity 0.2s ease;
+  }
+
+  .dock-right::-webkit-scrollbar { width: 4px; }
+  .dock-right::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 4px; }
+
+  .tool-btn {
+    width: 38px;
+    height: 38px;
+    padding: 0;
+    border-radius: 11px;
+  }
+
+  .tool-btn svg { width: 19px; height: 19px; }
+
+  /* Dock Inferior Flotante */
+  .dock-bottom {
+    position: absolute;
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    padding: 7px 13px;
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+    z-index: 15;
+    max-width: calc(100vw - 32px);
+    overflow-x: auto;
+    transition: opacity 0.2s ease;
+  }
+
+  .colors-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .swatch {
+    width: 23px;
+    height: 23px;
+    border-radius: 50%;
+    padding: 0;
+    border: 2px solid rgba(255, 255, 255, 0.25);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .swatch:hover { transform: scale(1.15); }
+  .swatch.selected {
+    transform: scale(1.18);
+    border-color: #ffffff;
+    box-shadow: 0 0 0 2px var(--accent), 0 0 12px var(--accent-glow);
+  }
+
+  .color-picker-wrap {
+    position: relative;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    overflow: hidden;
+    border: 2px solid rgba(255,255,255,0.3);
+    background: conic-gradient(red, yellow, lime, aqua, blue, magenta, red);
+    cursor: pointer;
+  }
+
+  .color-picker-wrap input[type="color"] {
+    opacity: 0;
+    width: 100%;
+    height: 100%;
+    cursor: pointer;
+    padding: 0;
+    border: 0;
+  }
+
+  .stroke-dots {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .stroke-btn {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border-radius: 8px;
+  }
+
+  .stroke-btn span {
+    display: block;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  .board-themes {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  .theme-dot {
+    width: 21px;
+    height: 21px;
+    border-radius: 6px;
+    padding: 0;
+    border: 1.5px solid rgba(255,255,255,0.3);
+  }
+
+  .theme-dot.active-theme {
+    border-color: var(--accent);
+    box-shadow: 0 0 8px var(--accent-glow);
+  }
+
+  /* Estado inferior izquierdo con @choq.yn */
+  .status-badge {
+    position: absolute;
+    bottom: 16px;
+    left: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    backdrop-filter: blur(12px);
+    padding: 6px 11px;
+    border-radius: 10px;
+    font-size: 11px;
+    color: var(--muted);
+    z-index: 14;
+  }
+
+  .ig-credit {
+    color: var(--accent);
+    text-decoration: none;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+  }
+
+  .ig-credit:hover { text-decoration: underline; }
+
+  /* Botón salir de modo presentación */
+  #exitPresBtn {
+    position: absolute;
+    top: 14px;
+    right: 16px;
+    display: none;
+    z-index: 40;
+    background: var(--panel-bg);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    box-shadow: var(--shadow);
+  }
+  body.presentation-mode #exitPresBtn { display: inline-flex; }
+
+  /* Modales */
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(6px);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 50;
+  }
+
+  .modal {
+    width: min(460px, calc(100vw - 32px));
+    background: #161f1c;
+    border: 1px solid var(--panel-border);
+    border-radius: 18px;
+    padding: 20px;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.7);
+  }
+
+  .modal h3 {
+    margin: 0 0 12px;
+    font-size: 16px;
+    color: var(--text);
+  }
+
+  .modal textarea, .modal input[type="text"] {
+    width: 100%;
+    background: rgba(0, 0, 0, 0.4);
+    color: var(--text);
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    padding: 10px;
+    font-family: inherit;
+    font-size: 14px;
+    outline: none;
+    user-select: text;
+    -webkit-user-select: text;
+  }
+
+  .modal textarea { min-height: 85px; resize: vertical; }
+  .modal textarea:focus, .modal input:focus { border-color: var(--accent); }
+
+  .symbol-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-bottom: 10px;
+  }
+
+  .sym-btn {
+    padding: 5px 9px;
+    font-size: 13px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 7px;
+  }
+
+  .modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 16px;
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: #06121e;
+    font-weight: 700;
+  }
+
+  .btn-primary:hover { background: #7dd3fc; }
+  .tiny { font-size: 12px; color: var(--muted); }
+
+  @media (max-width: 820px) {
+    .hud-top { flex-wrap: wrap; top: 8px; left: 8px; right: 8px; }
+    .dock-right { right: 8px; padding: 5px; gap: 4px; }
+    .tool-btn { width: 34px; height: 34px; }
+    .dock-bottom { bottom: 8px; padding: 6px 9px; gap: 6px; }
+    .status-badge { display: none; }
+  }
+</style>
+
+<style id="zenit-modern-youthful">
+  :root {
+    --panel-bg: rgba(15, 20, 38, .86);
+    --panel-border: rgba(167, 139, 250, .22);
+    --btn-bg: rgba(255,255,255,.065);
+    --btn-hover: rgba(139,92,246,.18);
+    --accent: #8b5cf6;
+    --accent-glow: rgba(139,92,246,.32);
+    --text: #f8fafc;
+    --muted: #a5b4cc;
+    --shadow: 0 18px 48px rgba(2,6,23,.38);
+  }
+  html, body { background: #080d1c; }
+  .hud-pill, .dock-right, .dock-bottom, .status-badge, #timerWidget {
+    background: linear-gradient(145deg, rgba(20,27,51,.94), rgba(10,15,31,.91));
+    border: 1px solid rgba(167,139,250,.20);
+    box-shadow: 0 16px 42px rgba(2,6,23,.34), inset 0 1px 0 rgba(255,255,255,.055);
+    backdrop-filter: blur(22px) saturate(145%);
+    -webkit-backdrop-filter: blur(22px) saturate(145%);
+    border-radius: 18px;
+  }
+  .brand { letter-spacing: 1.5px; }
+  button, select { border-radius: 12px; transition: background .18s ease, border-color .18s ease, box-shadow .18s ease, transform .18s ease; }
+  button:hover, select:hover { border-color: rgba(167,139,250,.45); box-shadow: 0 5px 18px rgba(99,102,241,.13); }
+  button.active { background: linear-gradient(135deg,#8b5cf6,#6366f1); color:#fff; box-shadow: 0 5px 20px rgba(99,102,241,.34); }
+  .dock-right { gap: 7px; padding: 11px 8px; }
+  .tool-btn { width: 40px; height: 40px; border-radius: 13px; }
+  .tool-btn svg { width: 19px; height: 19px; }
+  .dock-bottom { padding: 9px 15px; gap: 11px; }
+  .swatch { width: 24px; height: 24px; border: 2px solid rgba(255,255,255,.30); }
+  .swatch.selected { border-color:#fff; box-shadow:0 0 0 2px #8b5cf6,0 0 14px rgba(139,92,246,.45); }
+  .modal { background:linear-gradient(150deg,#171d37,#0d1328); border:1px solid rgba(167,139,250,.25); border-radius:22px; box-shadow:0 28px 90px rgba(0,0,0,.55); }
+  .btn-primary { background:linear-gradient(135deg,#8b5cf6,#6366f1); color:#fff; }
+  .btn-primary:hover { background:linear-gradient(135deg,#a78bfa,#818cf8); }
+  select, select option { background-color:#11182e; color:#f8fafc; }
+  @media(max-width:820px) { .dock-right,.dock-bottom { border-radius:15px; } }
+</style>
+
+</head>
+<body>
+<div id="app">
+  <main class="workspace" id="workspace">
+    <canvas id="board"></canvas>
+    <div id="laserDot"></div>
+
+    <!-- Cortina de Enfoque -->
+    <div id="curtainOverlay">
+      <div id="curtainHandle">☰ Arrasta para revelar</div>
+    </div>
+
+    <!-- Temporizador Flotante -->
+    <div id="timerWidget">
+      <span id="timerDisplay">05:00</span>
+      <button id="timerToggle" title="Iniciar / Pausar">▶</button>
+      <button id="timerReset" title="Reiniciar (5 min)">↺</button>
+      <button id="timerClose" title="Cerrar temporizador">✕</button>
+    </div>
+
+    <!-- Botón para salir del modo presentación -->
+    <button id="exitPresBtn" title="Salir del modo presentación (Esc)">Salir de Presentación</button>
+
+    <!-- HUD Superior -->
+    <div class="hud-top">
+      <!-- Izquierda: Marca + Historial + Zoom -->
+      <div class="hud-pill">
+        <div class="brand">
+          <svg viewBox="0 0 24 24"><polygon points="12 2 15.5 8.5 22 12 15.5 15.5 12 22 8.5 15.5 2 12 8.5 8.5"/></svg>
+          <span>ZENIT</span>
+        </div>
+        <div class="sep hud-hideable"></div>
+        <button id="undoBtn" class="hud-hideable" title="Deshacer (Ctrl+Z)">
+          <svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11"/></svg>
+        </button>
+        <button id="redoBtn" class="hud-hideable" title="Rehacer (Ctrl+Y)">
+          <svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5v0A5.5 5.5 0 0 0 9.5 20H13"/></svg>
+        </button>
+        <div class="sep hud-hideable"></div>
+        <button id="zoomOut" class="hud-hideable" title="Alejar">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+        </button>
+        <span id="zoomLabel" class="tiny hud-hideable" style="font-weight:700;min-width:38px;text-align:center">100%</span>
+        <button id="zoomIn" class="hud-hideable" title="Acercar">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+        </button>
+        <button id="zoomReset" class="hud-hideable" title="Centrar vista">
+          <svg viewBox="0 0 24 24"><path d="M3 9V5a2 2 0 0 1 2-2h4"/><path d="M21 9V5a2 2 0 0 0-2-2h-4"/><path d="M3 15v4a2 2 0 0 0 2 2h4"/><path d="M21 15v4a2 2 0 0 1-2 2h-4"/><circle cx="12" cy="12" r="2"/></svg>
+        </button>
+      </div>
+
+      <!-- Centro/Derecha: Páginas + Fondo + Herramientas Docentes + Exportar -->
+      <div class="hud-pill hud-hideable">
+        <button id="prevPage" title="Diapositiva anterior">‹</button>
+        <span id="pageCount" class="tiny" style="font-weight:700;padding:0 3px">1 / 1</span>
+        <button id="nextPage" title="Diapositiva siguiente">›</button>
+        <button id="addPage" title="Nueva diapositiva">＋</button>
+        <button id="deletePage" title="Eliminar diapositiva">−</button>
+        <div class="sep"></div>
+
+        <select id="paperType" title="Trama de fondo">
+          <option value="plain">Pizarra Lisa</option>
+          <option value="grid">Cuadrícula</option>
+          <option value="dots">Puntos</option>
+          <option value="lines">Rayado</option>
+        </select>
+
+        <button id="axesBtn" title="Activar/Desactivar Plano Cartesiano Infinito">
+          <svg viewBox="0 0 24 24"><line x1="12" y1="2" x2="12" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><polyline points="9 5 12 2 15 5"/><polyline points="19 9 22 12 19 15"/></svg>
+          <span style="font-size:11px">Ejes XY</span>
+        </button>
+
+        <button id="funcBtn" title="Graficar función matemática f(x)">
+          <span style="font-family:Georgia,serif;font-style:italic;font-weight:700;font-size:13px">f(x)</span>
+        </button>
+
+        <div class="sep"></div>
+
+        <!-- Instrumentos y Aula -->
+        <button id="rulerBtn" title="Mostrar/Ocultar Regla Virtual">
+          <svg viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="10" rx="2"/><line x1="6" y1="7" x2="6" y2="11"/><line x1="10" y1="7" x2="10" y2="10"/><line x1="14" y1="7" x2="14" y2="11"/><line x1="18" y1="7" x2="18" y2="10"/></svg>
+        </button>
+
+        <button id="protractorBtn" title="Mostrar/Ocultar Transportador">
+          <svg viewBox="0 0 24 24"><path d="M2 18a10 10 0 0 1 20 0Z"/><line x1="12" y1="18" x2="12" y2="11"/><line x1="12" y1="18" x2="17" y2="13"/></svg>
+        </button>
+
+        <button id="curtainBtn" title="Telón / Cortina de enfoque">
+          <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="12" x2="21" y2="12"/><polyline points="9 15 12 18 15 15"/></svg>
+        </button>
+
+        <button id="timerBtn" title="Temporizador de clase">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="8"/><polyline points="12 9 12 13 15 15"/><line x1="9" y1="2" x2="15" y2="2"/></svg>
+        </button>
+
+        <button id="presBtn" title="Modo Presentación (Ocultar barras)">
+          <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        </button>
+
+        <div class="sep"></div>
+
+        <!-- Formatos matemáticos -->
+        <button id="mathFormatBtn" title="Formatos matemáticos">
+          <span style="font-size:11px;font-weight:800;white-space:nowrap">form. mat.</span>
+        </button>
+
+        <button id="exportPngBtn" title="Descargar imagen PNG">
+          <span style="font-size:11px;font-weight:700">PNG</span>
+        </button>
+
+        <button id="exportPdfBtn" title="Exportar todas las páginas a PDF">
+          <span style="font-size:11px;font-weight:700">PDF</span>
+        </button>
+
+        <button id="clearBtn" title="Limpiar pizarra">
+          <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Dock Derecho: Herramientas de Dibujo -->
+    <aside class="dock-right" id="toolbar">
+      <button class="tool-btn tool active" data-tool="pen" title="Pluma (P)">
+        <svg viewBox="0 0 24 24"><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/><path d="m15 5 3 3"/></svg>
+      </button>
+
+      <button class="tool-btn tool" data-tool="highlighter" title="Resaltador Fluorescente (H)">
+        <svg viewBox="0 0 24 24"><path d="m15.5 4.5 4 4L10 18H6v-4Z"/><line x1="3" y1="21" x2="21" y2="21" stroke-width="3" opacity="0.5"/></svg>
+      </button>
+
+      <button class="tool-btn tool" data-tool="laser" title="Puntero Láser (L)">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="#ff2a55" stroke="#ff2a55"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/></svg>
+      </button>
+
+      <div class="sep" style="width:22px;height:1px;margin:2px 0"></div>
+
+      <button class="tool-btn tool" data-tool="line" title="Línea Recta">
+        <svg viewBox="0 0 24 24"><line x1="5" y1="19" x2="19" y2="5"/><circle cx="5" cy="19" r="2" fill="currentColor"/><circle cx="19" cy="5" r="2" fill="currentColor"/></svg>
+      </button>
+
+      <button class="tool-btn tool" data-tool="arrow" title="Flecha / Vector">
+        <svg viewBox="0 0 24 24"><line x1="5" y1="19" x2="19" y2="5"/><polyline points="10 5 19 5 19 14"/></svg>
+      </button>
+
+      <button class="tool-btn tool" data-tool="circle" title="Círculo / Elipse">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/></svg>
+      </button>
+
+      <button class="tool-btn tool" data-tool="quad" title="Rectángulo">
+        <svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+      </button>
+
+      <button class="tool-btn tool" data-tool="triangle" title="Triángulo">
+        <svg viewBox="0 0 24 24"><polygon points="12 4 21 19 3 19"/></svg>
+      </button>
+
+      <button class="tool-btn tool" data-tool="hexagon" title="Hexágono">
+        <svg viewBox="0 0 24 24"><polygon points="12 2.5 20.5 7.25 20.5 16.75 12 21.5 3.5 16.75 3.5 7.25"/></svg>
+      </button>
+
+      <div class="sep" style="width:22px;height:1px;margin:2px 0"></div>
+
+      <button class="tool-btn tool" data-tool="text" title="Texto (T)">
+        <svg viewBox="0 0 24 24"><polyline points="5 7 5 5 19 5 19 7"/><line x1="12" y1="5" x2="12" y2="19"/><line x1="9" y1="19" x2="15" y2="19"/></svg>
+      </button>
+
+      <button class="tool-btn" id="stickyBtn" title="Nota Adhesiva (Post-it)">
+        <svg viewBox="0 0 24 24"><path d="M15.5 3H5a2 2 0 0 0-2 2v14c0 1.1.9 2 2 2h14a2 2 0 0 0 2-2V8.5L15.5 3Z"/><polyline points="15 3 15 9 21 9"/></svg>
+      </button>
+
+      <button class="tool-btn" id="latexBtn" title="Fórmula Matemática (LaTeX / KaTeX)">
+        <svg viewBox="0 0 24 24"><path d="M3 13h2.5l2.5 6 3.5-13H21"/><path d="m14 11 4 6m0-6-4 6"/></svg>
+      </button>
+
+      <button class="tool-btn" id="imageBtn" title="Insertar Imagen">
+        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5" fill="currentColor"/><polyline points="21 15 16 10 5 21"/></svg>
+      </button>
+      <input id="imageInput" type="file" accept="image/*" hidden>
+
+      <div class="sep" style="width:22px;height:1px;margin:2px 0"></div>
+
+      <button class="tool-btn tool" data-tool="eraser" title="Borrador (E)">
+        <svg viewBox="0 0 24 24"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/></svg>
+      </button>
+
+      <button class="tool-btn tool" data-tool="select" title="Seleccionar, Redimensionar y Mover (V)">
+        <svg viewBox="0 0 24 24"><path d="m4 4 6.5 16 2.4-6.6L19.5 11Z"/></svg>
+      </button>
+    </aside>
+
+    <!-- Dock inferior: colores, grosores y superficies -->
+    <div class="dock-bottom">
+      <div class="colors-row" aria-label="Paleta de colores">
+        <button class="swatch selected" data-color="#f8fafc" style="background:#f8fafc" title="Blanca"></button>
+        <button class="swatch" data-color="#fde047" style="background:#fde047" title="Amarilla"></button>
+        <button class="swatch" data-color="#38bdf8" style="background:#38bdf8" title="Azul Celeste"></button>
+        <button class="swatch" data-color="#4ade80" style="background:#4ade80" title="Verde"></button>
+        <button class="swatch" data-color="#fb7185" style="background:#fb7185" title="Coral"></button>
+        <button class="swatch" data-color="#c084fc" style="background:#c084fc" title="Lila"></button>
+        <button class="swatch" data-color="#1e293b" style="background:#1e293b" title="Tinta Oscura"></button>
+        <div class="color-picker-wrap" title="Color personalizado">
+          <input type="color" id="customColor" value="#38bdf8">
+        </div>
+      </div>
+
+      <div class="sep"></div>
+
+      <div class="stroke-dots" title="Grosor del trazo">
+        <button class="stroke-btn active" data-width="2.5"><span style="width:4px;height:4px"></span></button>
+        <button class="stroke-btn" data-width="5"><span style="width:7px;height:7px"></span></button>
+        <button class="stroke-btn" data-width="9"><span style="width:11px;height:11px"></span></button>
+        <button class="stroke-btn" data-width="15"><span style="width:15px;height:15px"></span></button>
+      </div>
+
+      <div class="sep"></div>
+
+      <!-- Selector de superficie de pizarrón -->
+      <div class="board-themes" title="Color de pizarrón">
+        <button class="theme-dot active-theme" data-board="chalk-green" style="background:#14221d" title="Pizarrón Verde Clásico"></button>
+        <button class="theme-dot" data-board="chalk-dark" style="background:#12151c" title="Pizarrón Negro Pizarra"></button>
+        <button class="theme-dot" data-board="chalk-navy" style="background:#0f1c2e" title="Pizarrón Azul Profundo"></button>
+        <button class="theme-dot" data-board="whiteboard" style="background:#f8fafc" title="Pizarra Blanca"></button>
+      </div>
+    </div>
+
+    <!-- Estado inferior izquierdo con @choq.yn -->
+    <div class="status-badge">
+      <a class="ig-credit" href="https://www.instagram.com/choq.yn/" target="_blank" rel="noopener noreferrer">@choq.yn</a>
+      <span>·</span>
+      <span id="status">Pluma · 100% · Pág 1/1</span>
+    </div>
+  </main>
+</div>
+
+<!-- Modal Universal -->
+<div class="modal-backdrop" id="modal">
+  <div class="modal">
+    <h3 id="modalTitle">Insertar</h3>
+    <div id="modalBody"></div>
+    <div class="modal-actions">
+      <button id="cancelModal">Cancelar</button>
+      <button class="btn-primary" id="confirmModal">Insertar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('board');
+  const ctx = canvas.getContext('2d');
+  const workspace = document.getElementById('workspace');
+  const laserDot = document.getElementById('laserDot');
+  const $ = id => document.getElementById(id);
+
+  const BOARD_THEMES = {
+    'chalk-green': { bg: '#14221d', grid: 'rgba(255,255,255,0.06)', axis: '#fde047', axisText: '#fef08a', defaultInk: '#f8fafc' },
+    'chalk-dark':  { bg: '#12151c', grid: 'rgba(255,255,255,0.06)', axis: '#38bdf8', axisText: '#bae6fd', defaultInk: '#f8fafc' },
+    'chalk-navy':  { bg: '#0f1c2e', grid: 'rgba(56,189,248,0.09)', axis: '#fbbf24', axisText: '#fde68a', defaultInk: '#f8fafc' },
+    'whiteboard':  { bg: '#f8fafc', grid: 'rgba(15,23,42,0.08)',  axis: '#0284c7', axisText: '#0369a1', defaultInk: '#1e293b' }
+  };
+
+  let boardTheme = 'chalk-green';
+  let pages = [{ items: [] }];
+  let page = 0;
+  let tool = 'pen';
+  let color = '#f8fafc';
+  let thickness = 2.5;
+  let zoom = 1;
+  let offset = { x: 0, y: 0 };
+  let showAxes = false;
+  let spacing = 36;
+
+  // Instrumentos geométricos virtuales (en coordenadas de pantalla)
+  let ruler = { active: false, x: 240, y: 260, w: 380, h: 56, angle: 0 };
+  let protractor = { active: false, x: 460, y: 340, r: 120, angle: 0 };
+  let activeInstrument = null; // { type: 'ruler'|'protractor', mode: 'move'|'rotate', startX, startY, origX, origY, origAngle }
+
+  let drawing = null;
+  let selected = null;
+  let drag = null; // { item, mode: 'move'|'resize', last, origBounds, origItem }
+  let panDrag = null;
+  let laserTrail = [];
+  let undoStack = [];
+  let redoStack = [];
+  let modalAction = null;
+
+  const state = () => pages[page];
+
+  function serializePages() {
+    return JSON.stringify(pages.map(pg => ({
+      items: pg.items.map(o => {
+        const c = { ...o };
+        delete c.img;
+        return c;
+      })
+    })));
+  }
+
+  function snapshot() {
+    undoStack.push(serializePages());
+    if (undoStack.length > 60) undoStack.shift();
+    redoStack = [];
+    updateHistory();
+    autoSave();
+  }
+
+  function autoSave() {
+    try {
+      localStorage.setItem('zenit_blackboard_autosave', JSON.stringify({
+        boardTheme,
+        paper: $('paperType').value,
+        showAxes,
+        pages: JSON.parse(serializePages())
+      }));
+    } catch (e) {}
+  }
+
+  function loadAutoSave() {
+    try {
+      const raw = localStorage.getItem('zenit_blackboard_autosave');
+      if (!raw) return;
+      const data = JSON.parse(raw);
+      if (data.boardTheme && BOARD_THEMES[data.boardTheme]) {
+        boardTheme = data.boardTheme;
+        document.querySelectorAll('.theme-dot').forEach(x => x.classList.toggle('active-theme', x.dataset.board === boardTheme));
+      }
+      if (data.paper) $('paperType').value = data.paper;
+      if (data.showAxes) {
+        showAxes = true;
+        $('axesBtn').classList.add('active');
+      }
+      if (data.pages && data.pages.length) {
+        restorePages(JSON.stringify(data.pages));
+      }
+    } catch (e) {}
+  }
+
+  function updateHistory() {
+    $('undoBtn').disabled = !undoStack.length;
+    $('redoBtn').disabled = !redoStack.length;
+  }
+
+  function resize() {
+    const r = workspace.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.round(r.width * dpr);
+    canvas.height = Math.round(r.height * dpr);
+    canvas.style.width = r.width + 'px';
+    canvas.style.height = r.height + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (showAxes && offset.x === 0 && offset.y === 0) {
+      offset.x = r.width / 2;
+      offset.y = r.height / 2;
+    }
+    render();
+  }
+  window.addEventListener('resize', resize);
+
+  function dims() { return { w: canvas.clientWidth, h: canvas.clientHeight }; }
+  function world(p) { return { x: (p.x - offset.x) / zoom, y: (p.y - offset.y) / zoom }; }
+  function pointer(e) { const r = canvas.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+
+  // Renderizado de fórmula LaTeX a imagen SVG/Canvas mediante KaTeX
+  function renderLatexToImage(tex, textColor, callback) {
+    if (window.katex) {
+      try {
+        const html = window.katex.renderToString(tex, { throwOnError: false, displayMode: true });
+        const svg = `
+          <svg xmlns="http://www.w3.org/2000/svg" width="600" height="160">
+            <foreignObject width="100%" height="100%">
+              <div xmlns="http://www.w3.org/1999/xhtml" style="color:${textColor};font-size:28px;font-family:KaTeX_Main,Georgia,serif;display:inline-block;padding:8px;">
+                <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css"/>
+                ${html}
+              </div>
+            </foreignObject>
+          </svg>`;
+        const img = new Image();
+        img.onload = () => callback(img);
+        img.onerror = () => callback(null);
+        img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+        return;
+      } catch (e) {}
+    }
+    callback(null);
+  }
+
+  function render() {
+    const { w, h } = dims();
+    const themeObj = BOARD_THEMES[boardTheme];
+
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = themeObj.bg;
+    ctx.fillRect(0, 0, w, h);
+
+    ctx.save();
+    ctx.translate(offset.x, offset.y);
+    ctx.scale(zoom, zoom);
+
+    drawPaper(w, h, themeObj);
+    if (showAxes) drawAxes(w, h, themeObj);
+
+    for (const item of state().items) drawItem(item);
+    if (drawing) drawPreview(drawing);
+
+    // Marco de selección con nodo de redimensionado
+    if (selected) {
+      const b = bounds(selected);
+      const pad = 6 / zoom;
+      ctx.save();
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 1.5 / zoom;
+      ctx.setLineDash([5 / zoom, 4 / zoom]);
+      ctx.strokeRect(b.x - pad, b.y - pad, b.w + pad * 2, b.h + pad * 2);
+      ctx.setLineDash([]);
+      // Nodo esquina inferior derecha para escalar
+      const hs = 9 / zoom;
+      ctx.fillStyle = '#38bdf8';
+      ctx.fillRect(b.x + b.w + pad - hs / 2, b.y + b.h + pad - hs / 2, hs, hs);
+      ctx.restore();
+    }
+
+    // Estela del láser
+    if (laserTrail.length > 1) {
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      for (let i = 1; i < laserTrail.length; i++) {
+        const alpha = i / laserTrail.length;
+        ctx.strokeStyle = `rgba(255, 42, 85, ${alpha * 0.85})`;
+        ctx.lineWidth = (6 * alpha) / zoom;
+        ctx.beginPath();
+        ctx.moveTo(laserTrail[i - 1].x, laserTrail[i - 1].y);
+        ctx.lineTo(laserTrail[i].x, laserTrail[i].y);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    ctx.restore();
+
+    // Instrumentos geométricos en pantalla
+    if (ruler.active) drawRuler();
+    if (protractor.active) drawProtractor();
+
+    $('zoomLabel').textContent = Math.round(zoom * 100) + '%';
+    const toolNames = {
+      pen: 'Pluma', highlighter: 'Resaltador', laser: 'Láser',
+      line: 'Línea', arrow: 'Flecha', circle: 'Círculo',
+      quad: 'Rectángulo', triangle: 'Triángulo', hexagon: 'Hexágono',
+      text: 'Texto', eraser: 'Borrador', select: 'Seleccionar'
+    };
+    $('status').textContent = `${toolNames[tool] || tool} · ${Math.round(zoom * 100)}% · Pág ${page + 1}/${pages.length}`;
+  }
+
+  function drawPaper(w, h, themeObj) {
+    const type = $('paperType').value;
+    if (type === 'plain') return;
+
+    const left = -offset.x / zoom;
+    const top = -offset.y / zoom;
+    const right = (w - offset.x) / zoom;
+    const bottom = (h - offset.y) / zoom;
+
+    ctx.save();
+    ctx.strokeStyle = themeObj.grid;
+    ctx.fillStyle = themeObj.grid;
+    ctx.lineWidth = 1 / zoom;
+
+    if (type === 'grid') {
+      ctx.beginPath();
+      for (let x = Math.floor(left / spacing) * spacing; x < right; x += spacing) {
+        ctx.moveTo(x, top); ctx.lineTo(x, bottom);
+      }
+      for (let y = Math.floor(top / spacing) * spacing; y < bottom; y += spacing) {
+        ctx.moveTo(left, y); ctx.lineTo(right, y);
+      }
+      ctx.stroke();
+    } else if (type === 'lines') {
+      ctx.beginPath();
+      for (let y = Math.floor(top / spacing) * spacing; y < bottom; y += spacing) {
+        ctx.moveTo(left, y); ctx.lineTo(right, y);
+      }
+      ctx.stroke();
+    } else if (type === 'dots') {
+      for (let x = Math.floor(left / spacing) * spacing; x < right; x += spacing) {
+        for (let y = Math.floor(top / spacing) * spacing; y < bottom; y += spacing) {
+          ctx.beginPath();
+          ctx.arc(x, y, 1.4 / zoom, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+    ctx.restore();
+  }
+
+  // Plano Cartesiano Infinito
+  function drawAxes(w, h, themeObj) {
+    const unit = spacing;
+    const left = -offset.x / zoom;
+    const top = -offset.y / zoom;
+    const right = (w - offset.x) / zoom;
+    const bottom = (h - offset.y) / zoom;
+
+    ctx.save();
+    ctx.lineWidth = 2 / zoom;
+    ctx.strokeStyle = themeObj.axis;
+    ctx.fillStyle = themeObj.axisText;
+
+    ctx.beginPath();
+    ctx.moveTo(left, 0); ctx.lineTo(right, 0);
+    ctx.moveTo(0, top); ctx.lineTo(0, bottom);
+    ctx.stroke();
+
+    const minX = Math.floor(left / unit), maxX = Math.ceil(right / unit);
+    const minY = Math.floor(-bottom / unit), maxY = Math.ceil(-top / unit);
+    const labelStep = Math.max(1, Math.ceil(36 / (unit * zoom)));
+
+    ctx.lineWidth = 1 / zoom;
+    ctx.font = `${11 / zoom}px Inter, Arial`;
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    for (let i = minX; i <= maxX; i++) {
+      const x = i * unit;
+      ctx.beginPath();
+      ctx.moveTo(x, -4 / zoom);
+      ctx.lineTo(x, 4 / zoom);
+      ctx.stroke();
+      if (i !== 0 && i % labelStep === 0) ctx.fillText(i, x, 6 / zoom);
+    }
+
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    for (let i = minY; i <= maxY; i++) {
+      const y = -i * unit;
+      ctx.beginPath();
+      ctx.moveTo(-4 / zoom, y);
+      ctx.lineTo(4 / zoom, y);
+      ctx.stroke();
+      if (i !== 0 && i % labelStep === 0) ctx.fillText(i, -7 / zoom, y);
+    }
+
+    ctx.font = `bold ${12 / zoom}px Inter, Arial`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText('X', right - 16 / zoom, 7 / zoom);
+    ctx.fillText('Y', 8 / zoom, top + 6 / zoom);
+    ctx.font = `${11 / zoom}px Inter, Arial`;
+    ctx.fillText('0', 6 / zoom, 6 / zoom);
+    ctx.restore();
+  }
+
+  function drawItem(o) {
+    ctx.save();
+    ctx.globalAlpha = o.opacity ?? 1;
+    ctx.strokeStyle = o.color;
+    ctx.fillStyle = o.color;
+    ctx.lineWidth = o.width || 3;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    if (o.type === 'path') {
+      if (!o.points.length) { ctx.restore(); return; }
+      ctx.beginPath();
+      ctx.moveTo(o.points[0].x, o.points[0].y);
+      for (let i = 1; i < o.points.length; i++) {
+        ctx.lineTo(o.points[i].x, o.points[i].y);
+      }
+      ctx.stroke();
+    } else if (o.type === 'function') {
+      // Curva matemática f(x) sobre el plano cartesiano
+      const unit = spacing;
+      const { w } = dims();
+      const left = -offset.x / zoom;
+      const right = (w - offset.x) / zoom;
+      const stepPx = 2 / zoom;
+      ctx.beginPath();
+      let started = false;
+      for (let px = left; px <= right; px += stepPx) {
+        const mathX = px / unit;
+        const mathY = evalMathExpr(o.expr, mathX);
+        if (Number.isFinite(mathY) && Math.abs(mathY) < 500) {
+          const py = -mathY * unit;
+          if (!started) { ctx.moveTo(px, py); started = true; }
+          else ctx.lineTo(px, py);
+        } else {
+          started = false;
+        }
+      }
+      ctx.stroke();
+      // Etiqueta de la función
+      ctx.font = `italic bold 14px Georgia, serif`;
+      ctx.fillText(`f(x) = ${o.expr}`, o.labelX ?? 40, o.labelY ?? -40);
+    } else if (o.type === 'line') {
+      ctx.beginPath();
+      ctx.moveTo(o.x1, o.y1);
+      ctx.lineTo(o.x2, o.y2);
+      ctx.stroke();
+    } else if (o.type === 'arrow') {
+      drawArrowShape(ctx, o.x1, o.y1, o.x2, o.y2, o.width || 3);
+    } else if (o.type === 'shape') {
+      const pts = o.points;
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      pts.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
+      ctx.closePath();
+      ctx.stroke();
+    } else if (o.type === 'sticky') {
+      const sw = o.w || 180, sh = o.h || 150;
+      ctx.shadowColor = 'rgba(0,0,0,0.4)';
+      ctx.shadowBlur = 12;
+      ctx.shadowOffsetY = 6;
+      ctx.fillStyle = o.bg || '#fef08a';
+      ctx.fillRect(o.x, o.y, sw, sh);
+      ctx.shadowColor = 'transparent';
+      // Doblez superior
+      ctx.fillStyle = 'rgba(0,0,0,0.08)';
+      ctx.fillRect(o.x, o.y, sw, 22);
+      ctx.fillStyle = '#1e293b';
+      ctx.font = `600 ${o.size || 16}px Inter, Arial`;
+      ctx.textBaseline = 'top';
+      wrapText(ctx, o.text, o.x + 12, o.y + 30, sw - 24, (o.size || 16) * 1.3);
+    } else if (o.type === 'text') {
+      ctx.font = `${o.size || 24}px Inter, Arial`;
+      ctx.textBaseline = 'top';
+      const lines = o.text.split('\n');
+      lines.forEach((line, idx) => ctx.fillText(line, o.x, o.y + idx * (o.size || 24) * 1.25));
+    } else if (o.type === 'latex') {
+      if (o.img && o.img.complete) {
+        ctx.drawImage(o.img, o.x, o.y, o.w || 260, o.h || 70);
+      } else {
+        ctx.font = `italic ${o.size || 28}px Georgia, serif`;
+        ctx.textBaseline = 'top';
+        ctx.fillText(o.text, o.x, o.y);
+      }
+    } else if (o.type === 'image' && o.img) {
+      ctx.drawImage(o.img, o.x, o.y, o.w, o.h);
+    }
+    ctx.restore();
+  }
+
+  function wrapText(context, text, x, y, maxWidth, lineHeight) {
+    const words = text.split(' ');
+    let line = '';
+    for (let n = 0; n < words.length; n++) {
+      const testLine = line + words[n] + ' ';
+      if (context.measureText(testLine).width > maxWidth && n > 0) {
+        context.fillText(line, x, y);
+        line = words[n] + ' ';
+        y += lineHeight;
+      } else {
+        line = testLine;
+      }
+    }
+    context.fillText(line, x, y);
+  }
+
+  // Evaluador seguro de expresiones matemáticas para f(x)
+  function evalMathExpr(expr, x) {
+    try {
+      let clean = expr.toLowerCase()
+        .replace(/\^/g, '**')
+        .replace(/(\d)(x)/g, '$1*$2')
+        .replace(/sin\(/g, 'Math.sin(')
+        .replace(/cos\(/g, 'Math.cos(')
+        .replace(/tan\(/g, 'Math.tan(')
+        .replace(/sqrt\(/g, 'Math.sqrt(')
+        .replace(/abs\(/g, 'Math.abs(')
+        .replace(/log\(/g, 'Math.log10(')
+        .replace(/ln\(/g, 'Math.log(')
+        .replace(/pi/g, 'Math.PI')
+        .replace(/\be\b/g, 'Math.E');
+      const fn = new Function('x', `return (${clean});`);
+      return fn(x);
+    } catch (e) {
+      return NaN;
+    }
+  }
+
+  // Regla Virtual Interactiva
+  function drawRuler() {
+    ctx.save();
+    ctx.translate(ruler.x, ruler.y);
+    ctx.rotate(ruler.angle);
+    ctx.fillStyle = 'rgba(56, 189, 248, 0.22)';
+    ctx.strokeStyle = '#38bdf8';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.roundRect(0, 0, ruler.w, ruler.h, 6);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = '#e0f2fe';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'center';
+    for (let px = 10; px <= ruler.w - 10; px += 10) {
+      const isCm = (px - 10) % 50 === 0;
+      const tickH = isCm ? 16 : 9;
+      ctx.beginPath();
+      ctx.moveTo(px, 0);
+      ctx.lineTo(px, tickH);
+      ctx.stroke();
+      if (isCm) ctx.fillText(((px - 10) / 50).toString(), px, 27);
+    }
+    // Botón de rotación en el extremo derecho
+    ctx.fillStyle = '#38bdf8';
+    ctx.beginPath();
+    ctx.arc(ruler.w - 16, ruler.h / 2, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Transportador Virtual Interactivo
+  function drawProtractor() {
+    ctx.save();
+    ctx.translate(protractor.x, protractor.y);
+    ctx.rotate(protractor.angle);
+    ctx.fillStyle = 'rgba(250, 204, 21, 0.18)';
+    ctx.strokeStyle = '#facc15';
+    ctx.lineWidth = 1.5;
+
+    ctx.beginPath();
+    ctx.arc(0, 0, protractor.r, Math.PI, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = '#fef08a';
+    ctx.font = '9px monospace';
+    ctx.textAlign = 'center';
+    for (let deg = 0; deg <= 180; deg += 10) {
+      const rad = -Math.PI + (deg * Math.PI) / 180;
+      const inner = deg % 30 === 0 ? protractor.r - 16 : protractor.r - 9;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(rad) * inner, Math.sin(rad) * inner);
+      ctx.lineTo(Math.cos(rad) * protractor.r, Math.sin(rad) * protractor.r);
+      ctx.stroke();
+      if (deg % 30 === 0) {
+        ctx.fillText(deg + '°', Math.cos(rad) * (protractor.r - 26), Math.sin(rad) * (protractor.r - 26));
+      }
+    }
+    ctx.beginPath();
+    ctx.arc(0, 0, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawPreview(d) {
+    if (d.type === 'path') { drawItem(d); return; }
+    const { start: a, end: b, tool: t } = d;
+    if (t === 'line') drawItem({ type: 'line', x1: a.x, y1: a.y, x2: b.x, y2: b.y, color: d.color, width: d.width });
+    else if (t === 'arrow') drawItem({ type: 'arrow', x1: a.x, y1: a.y, x2: b.x, y2: b.y, color: d.color, width: d.width });
+    else if (t === 'circle') drawItem({ type: 'shape', points: makeCircle(a, b), color: d.color, width: d.width });
+    else if (['triangle', 'quad', 'hexagon'].includes(t)) drawItem({ type: 'shape', points: makePolygon(t, a, b), color: d.color, width: d.width });
+  }
+
+  function drawArrowShape(c, x1, y1, x2, y2, w) {
+    const headlen = Math.max(12, w * 4);
+    const angle = Math.atan2(y2 - y1, x2 - x1);
+    c.beginPath(); c.moveTo(x1, y1); c.lineTo(x2, y2); c.stroke();
+    c.beginPath();
+    c.moveTo(x2, y2);
+    c.lineTo(x2 - headlen * Math.cos(angle - Math.PI / 6), y2 - headlen * Math.sin(angle - Math.PI / 6));
+    c.lineTo(x2 - headlen * Math.cos(angle + Math.PI / 6), y2 - headlen * Math.sin(angle + Math.PI / 6));
+    c.closePath();
+    c.fill();
+  }
+
+  function makeCircle(a, b) {
+    const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2;
+    const rx = Math.abs(b.x - a.x) / 2, ry = Math.abs(b.y - a.y) / 2;
+    const pts = [];
+    for (let i = 0; i < 48; i++) {
+      const ang = (i * Math.PI * 2) / 48;
+      pts.push({ x: cx + Math.cos(ang) * rx, y: cy + Math.sin(ang) * ry });
+    }
+    return pts;
+  }
+
+  function makePolygon(kind, a, b) {
+    if (kind === 'quad') return [{ x: a.x, y: a.y }, { x: b.x, y: a.y }, { x: b.x, y: b.y }, { x: a.x, y: b.y }];
+    const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2;
+    const rx = Math.abs(b.x - a.x) / 2, ry = Math.abs(b.y - a.y) / 2;
+    const n = kind === 'triangle' ? 3 : 6;
+    const pts = [];
+    for (let i = 0; i < n; i++) {
+      const ang = -Math.PI / 2 + (i * 2 * Math.PI) / n;
+      pts.push({ x: cx + Math.cos(ang) * rx, y: cy + Math.sin(ang) * ry });
+    }
+    return pts;
+  }
+
+  function bounds(o) {
+    if (o.type === 'path' || o.type === 'shape') {
+      const xs = o.points.map(p => p.x), ys = o.points.map(p => p.y);
+      return { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(14, Math.max(...xs) - Math.min(...xs)), h: Math.max(14, Math.max(...ys) - Math.min(...ys)) };
+    }
+    if (o.type === 'line' || o.type === 'arrow') {
+      return { x: Math.min(o.x1, o.x2), y: Math.min(o.y1, o.y2), w: Math.max(14, Math.abs(o.x2 - o.x1)), h: Math.max(14, Math.abs(o.y2 - o.y1)) };
+    }
+    if (o.type === 'function') {
+      return { x: (o.labelX ?? 40) - 10, y: (o.labelY ?? -40) - 20, w: 160, h: 40 };
+    }
+    return { x: o.x, y: o.y, w: o.w || Math.max(60, (o.text || '').length * (o.size || 24) * 0.58), h: o.h || ((o.size || 24) * 1.35) };
+  }
+
+  function hit(p, o) {
+    const b = bounds(o), pad = 12 / zoom;
+    return p.x >= b.x - pad && p.x <= b.x + b.w + pad && p.y >= b.y - pad && p.y <= b.y + b.h + pad;
+  }
+
+  function moveItem(o, dx, dy) {
+    if (o.type === 'path' || o.type === 'shape') o.points.forEach(p => { p.x += dx; p.y += dy; });
+    else if (o.type === 'line' || o.type === 'arrow') { o.x1 += dx; o.y1 += dy; o.x2 += dx; o.y2 += dy; }
+    else if (o.type === 'function') { o.labelX = (o.labelX ?? 40) + dx; o.labelY = (o.labelY ?? -40) + dy; }
+    else { o.x += dx; o.y += dy; }
+  }
+
+  function scaleItem(o, origItem, origB, newW, newH) {
+    const sx = Math.max(0.15, newW / origB.w);
+    const sy = Math.max(0.15, newH / origB.h);
+    if (o.type === 'path' || o.type === 'shape') {
+      o.points = origItem.points.map(pt => ({
+        x: origB.x + (pt.x - origB.x) * sx,
+        y: origB.y + (pt.y - origB.y) * sy
+      }));
+    } else if (o.type === 'line' || o.type === 'arrow') {
+      o.x1 = origB.x + (origItem.x1 - origB.x) * sx;
+      o.y1 = origB.y + (origItem.y1 - origB.y) * sy;
+      o.x2 = origB.x + (origItem.x2 - origB.x) * sx;
+      o.y2 = origB.y + (origItem.y2 - origB.y) * sy;
+    } else if (o.type === 'text') {
+      o.size = Math.max(10, Math.round((origItem.size || 24) * sy));
+    } else {
+      o.w = Math.max(30, origB.w * sx);
+      o.h = Math.max(30, origB.h * sy);
+    }
+  }
+
+  // Verificar si se hizo clic en la regla o transportador
+  function hitInstruments(sp) {
+    if (ruler.active) {
+      const dx = sp.x - ruler.x, dy = sp.y - ruler.y;
+      const lx = dx * Math.cos(-ruler.angle) - dy * Math.sin(-ruler.angle);
+      const ly = dx * Math.sin(-ruler.angle) + dy * Math.cos(-ruler.angle);
+      if (lx >= 0 && lx <= ruler.w && ly >= 0 && ly <= ruler.h) {
+        const isRotate = Math.hypot(lx - (ruler.w - 16), ly - ruler.h / 2) < 16;
+        return { type: 'ruler', mode: isRotate ? 'rotate' : 'move', startX: sp.x, startY: sp.y, origX: ruler.x, origY: ruler.y, origAngle: ruler.angle };
+      }
+    }
+    if (protractor.active) {
+      const dist = Math.hypot(sp.x - protractor.x, sp.y - protractor.y);
+      if (dist <= protractor.r + 10) {
+        return { type: 'protractor', mode: dist > protractor.r - 22 ? 'rotate' : 'move', startX: sp.x, startY: sp.y, origX: protractor.x, origY: protractor.y, origAngle: protractor.angle };
+      }
+    }
+    return null;
+  }
+
+  canvas.addEventListener('pointerdown', e => {
+    canvas.setPointerCapture(e.pointerId);
+    const sp = pointer(e);
+    const p = world(sp);
+
+    // Prioridad a mover/rotar regla o transportador si se tocan
+    const instHit = hitInstruments(sp);
+    if (instHit) {
+      activeInstrument = instHit;
+      return;
+    }
+
+    if (tool === 'laser') {
+      laserTrail = [p];
+      laserDot.style.display = 'block';
+      laserDot.style.left = sp.x + 'px';
+      laserDot.style.top = sp.y + 'px';
+      render();
+      return;
+    }
+
+    if (tool === 'select') {
+      // Verificar primero si se tocó el nodo de redimensionado del elemento seleccionado
+      if (selected) {
+        const b = bounds(selected);
+        const pad = 6 / zoom;
+        const hx = b.x + b.w + pad, hy = b.y + b.h + pad;
+        if (Math.hypot(p.x - hx, p.y - hy) <= 14 / zoom) {
+          snapshot();
+          drag = {
+            item: selected,
+            mode: 'resize',
+            origBounds: b,
+            origItem: JSON.parse(JSON.stringify({ ...selected, img: undefined }))
+          };
+          return;
+        }
+      }
+
+      const found = [...state().items].reverse().find(o => hit(p, o));
+      selected = found || null;
+      if (found) {
+        snapshot();
+        drag = { item: found, mode: 'move', last: p };
+      } else {
+        panDrag = { last: sp };
+      }
+      render();
+      return;
+    }
+
+    if (tool === 'eraser') {
+      const idx = state().items.findIndex(o => hit(p, o));
+      if (idx >= 0) {
+        snapshot();
+        state().items.splice(idx, 1);
+      }
+      render();
+      return;
+    }
+
+    if (tool === 'text') {
+      openModal('Insertar Texto', '<textarea id="entry" placeholder="Escribe tu nota o explicación aquí..."></textarea>', () => {
+        const v = $('entry').value.trim();
+        if (v) {
+          snapshot();
+          state().items.push({ type: 'text', x: p.x, y: p.y, text: v, color, size: 24 });
+          render();
+        }
+      });
+      setTimeout(() => $('entry')?.focus(), 50);
+      return;
+    }
+
+    if (tool === 'pen' || tool === 'highlighter') {
+      drawing = {
+        type: 'path',
+        points: [p],
+        color,
+        width: tool === 'highlighter' ? Math.max(16, thickness * 3.5) : thickness,
+        opacity: tool === 'highlighter' ? 0.32 : 1
+      };
+      render();
+      return;
+    }
+
+    drawing = { type: 'temp', tool, start: p, end: p, color, width: thickness };
+  });
+
+  canvas.addEventListener('pointermove', e => {
+    const sp = pointer(e);
+    const p = world(sp);
+
+    if (activeInstrument) {
+      if (activeInstrument.type === 'ruler') {
+        if (activeInstrument.mode === 'move') {
+          ruler.x = activeInstrument.origX + (sp.x - activeInstrument.startX);
+          ruler.y = activeInstrument.origY + (sp.y - activeInstrument.startY);
+        } else {
+          ruler.angle = Math.atan2(sp.y - ruler.y, sp.x - ruler.x);
+        }
+      } else if (activeInstrument.type === 'protractor') {
+        if (activeInstrument.mode === 'move') {
+          protractor.x = activeInstrument.origX + (sp.x - activeInstrument.startX);
+          protractor.y = activeInstrument.origY + (sp.y - activeInstrument.startY);
+        } else {
+          protractor.angle = Math.atan2(sp.y - protractor.y, sp.x - protractor.x);
+        }
+      }
+      render();
+      return;
+    }
+
+    if (tool === 'laser') {
+      laserDot.style.display = 'block';
+      laserDot.style.left = sp.x + 'px';
+      laserDot.style.top = sp.y + 'px';
+      if (e.buttons > 0) {
+        laserTrail.push(p);
+        if (laserTrail.length > 24) laserTrail.shift();
+        render();
+      }
+      return;
+    }
+
+    if (drag) {
+      if (drag.mode === 'move') {
+        moveItem(drag.item, p.x - drag.last.x, p.y - drag.last.y);
+        drag.last = p;
+      } else if (drag.mode === 'resize') {
+        const newW = p.x - drag.origBounds.x;
+        const newH = p.y - drag.origBounds.y;
+        scaleItem(drag.item, drag.origItem, drag.origBounds, newW, newH);
+      }
+      render();
+      return;
+    }
+
+    if (panDrag) {
+      offset.x += sp.x - panDrag.last.x;
+      offset.y += sp.y - panDrag.last.y;
+      panDrag.last = sp;
+      render();
+      return;
+    }
+
+    if (!drawing) return;
+    if (drawing.type === 'path') {
+      drawing.points.push(p);
+    } else {
+      drawing.end = p;
+    }
+    render();
+  });
+
+  canvas.addEventListener('pointerup', () => {
+    if (activeInstrument) { activeInstrument = null; return; }
+    if (tool === 'laser') { laserTrail = []; render(); return; }
+    if (drag) { drag = null; autoSave(); render(); return; }
+    if (panDrag) { panDrag = null; render(); return; }
+    if (!drawing) return;
+
+    if (drawing.type === 'path') {
+      snapshot();
+      state().items.push(drawing);
+      drawing = null;
+      render();
+      return;
+    }
+
+    const { start: a, end: b, tool: t } = drawing;
+    let o = null;
+    if (t === 'line') o = { type: 'line', x1: a.x, y1: a.y, x2: b.x, y2: b.y, color, width: thickness };
+    else if (t === 'arrow') o = { type: 'arrow', x1: a.x, y1: a.y, x2: b.x, y2: b.y, color, width: thickness };
+    else if (t === 'circle') o = { type: 'shape', points: makeCircle(a, b), color, width: thickness };
+    else if (['triangle', 'quad', 'hexagon'].includes(t)) o = { type: 'shape', points: makePolygon(t, a, b), color, width: thickness };
+
+    if (o) {
+      snapshot();
+      state().items.push(o);
+      selected = o;
+    }
+    drawing = null;
+    render();
+  });
+
+  canvas.addEventListener('pointerleave', () => { laserDot.style.display = 'none'; });
+
+  canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    const sp = pointer(e);
+    const before = world(sp);
+    zoom = Math.max(0.2, Math.min(5, zoom * (e.deltaY < 0 ? 1.12 : 0.89)));
+    offset.x = sp.x - before.x * zoom;
+    offset.y = sp.y - before.y * zoom;
+    render();
+  }, { passive: false });
+
+  // Selección de herramientas
+  function setTool(t) {
+    tool = t;
+    document.querySelectorAll('.tool').forEach(b => b.classList.toggle('active', b.dataset.tool === t));
+    selected = null;
+    laserDot.style.display = 'none';
+    canvas.style.cursor = t === 'select' ? 'grab' : t === 'laser' ? 'none' : 'crosshair';
+    render();
+  }
+  document.querySelectorAll('.tool').forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool)));
+
+  // Colores, Grosores y Temas
+  document.querySelectorAll('.swatch').forEach(b => {
+    b.addEventListener('click', () => {
+      color = b.dataset.color;
+      document.querySelectorAll('.swatch').forEach(x => x.classList.toggle('selected', x === b));
+    });
+  });
+
+  $('customColor').addEventListener('input', e => {
+    color = e.target.value;
+    document.querySelectorAll('.swatch').forEach(x => x.classList.remove('selected'));
+  });
+
+  document.querySelectorAll('.stroke-btn').forEach(b => {
+    b.addEventListener('click', () => {
+      thickness = Number(b.dataset.width);
+      document.querySelectorAll('.stroke-btn').forEach(x => x.classList.toggle('active', x === b));
+    });
+  });
+
+  document.querySelectorAll('.theme-dot').forEach(b => {
+    b.addEventListener('click', () => {
+      boardTheme = b.dataset.board;
+      document.querySelectorAll('.theme-dot').forEach(x => x.classList.toggle('active-theme', x === b));
+      const defInk = BOARD_THEMES[boardTheme].defaultInk;
+      color = defInk;
+      document.querySelectorAll('.swatch').forEach(x => x.classList.toggle('selected', x.dataset.color === defInk));
+      autoSave();
+      render();
+    });
+  });
+
+  // Ejes XY
+  $('axesBtn').onclick = () => {
+    showAxes = !showAxes;
+    $('axesBtn').classList.toggle('active', showAxes);
+    if (showAxes && offset.x === 0 && offset.y === 0) {
+      const { w, h } = dims();
+      offset.x = w / 2;
+      offset.y = h / 2;
+    }
+    autoSave();
+    render();
+  };
+
+  $('paperType').onchange = () => { autoSave(); render(); };
+
+  // Instrumentos geométricos y aula
+  $('rulerBtn').onclick = () => {
+    ruler.active = !ruler.active;
+    $('rulerBtn').classList.toggle('active', ruler.active);
+    render();
+  };
+
+  $('protractorBtn').onclick = () => {
+    protractor.active = !protractor.active;
+    $('protractorBtn').classList.toggle('active', protractor.active);
+    render();
+  };
+
+  // Cortina de enfoque
+  const curtain = $('curtainOverlay');
+  $('curtainBtn').onclick = () => {
+    const visible = curtain.style.display === 'block';
+    curtain.style.display = visible ? 'none' : 'block';
+    $('curtainBtn').classList.toggle('active', !visible);
+  };
+
+  let draggingCurtain = false;
+  $('curtainHandle').addEventListener('pointerdown', e => {
+    draggingCurtain = true;
+    $('curtainHandle').setPointerCapture(e.pointerId);
+  });
+  window.addEventListener('pointermove', e => {
+    if (!draggingCurtain) return;
+    const rect = workspace.getBoundingClientRect();
+    const newH = Math.max(40, Math.min(rect.height - 50, rect.bottom - e.clientY));
+    curtain.style.height = newH + 'px';
+  });
+  window.addEventListener('pointerup', () => { draggingCurtain = false; });
+
+  // Temporizador Flotante
+  let timerSeconds = 300;
+  let timerInterval = null;
+  function updateTimerUI() {
+    const m = String(Math.floor(timerSeconds / 60)).padStart(2, '0');
+    const s = String(timerSeconds % 60).padStart(2, '0');
+    $('timerDisplay').textContent = `${m}:${s}`;
+  }
+  $('timerBtn').onclick = () => {
+    const w = $('timerWidget');
+    const open = w.style.display === 'flex';
+    w.style.display = open ? 'none' : 'flex';
+    $('timerBtn').classList.toggle('active', !open);
+  };
+  $('timerToggle').onclick = () => {
+    if (timerInterval) {
+      clearInterval(timerInterval);
+      timerInterval = null;
+      $('timerToggle').textContent = '▶';
+    } else {
+      $('timerToggle').textContent = '❚❚';
+      timerInterval = setInterval(() => {
+        if (timerSeconds > 0) { timerSeconds--; updateTimerUI(); }
+        else { clearInterval(timerInterval); timerInterval = null; $('timerToggle').textContent = '▶'; }
+      }, 1000);
+    }
+  };
+  $('timerReset').onclick = () => {
+    clearInterval(timerInterval);
+    timerInterval = null;
+    timerSeconds = 300;
+    $('timerToggle').textContent = '▶';
+    updateTimerUI();
+  };
+  $('timerClose').onclick = () => {
+    $('timerWidget').style.display = 'none';
+    $('timerBtn').classList.remove('active');
+  };
+
+  // Modo Presentación
+  $('presBtn').onclick = () => document.body.classList.add('presentation-mode');
+  $('exitPresBtn').onclick = () => document.body.classList.remove('presentation-mode');
+
+  // Modales
+  function openModal(title, body, action) {
+    $('modalTitle').textContent = title;
+    $('modalBody').innerHTML = body;
+    $('confirmModal').style.display = '';
+    $('modal').style.display = 'flex';
+    modalAction = action;
+  }
+  function closeModal() {
+    $('modal').style.display = 'none';
+    modalAction = null;
+  }
+  $('cancelModal').onclick = closeModal;
+  $('confirmModal').onclick = () => {
+    const f = modalAction;
+    closeModal();
+    if (f) f();
+  };
+
+  // Graficador de funciones f(x)
+  $('funcBtn').onclick = () => {
+    openModal(
+      'Graficar Función Matemática f(x)',
+      `<p class="tiny" style="margin-top:0">Escribe una función en términos de <b>x</b> (ej: <code>x^2 - 4</code>, <code>sin(x)*3</code>, <code>2*x + 1</code>):</p>
+       <input type="text" id="entry" placeholder="x^2 - 3">`,
+      () => {
+        const expr = $('entry').value.trim();
+        if (!expr) return;
+        if (!showAxes) {
+          showAxes = true;
+          $('axesBtn').classList.add('active');
+          const { w, h } = dims();
+          offset.x = w / 2;
+          offset.y = h / 2;
+        }
+        snapshot();
+        state().items.push({
+          type: 'function',
+          expr,
+          color,
+          width: Math.max(3, thickness),
+          labelX: 30,
+          labelY: -50
+        });
+        render();
+      }
+    );
+    setTimeout(() => $('entry')?.focus(), 50);
+  };
+
+  // Nota Adhesiva (Post-it)
+  $('stickyBtn').onclick = () => {
+    openModal(
+      'Insertar Nota Adhesiva',
+      `<textarea id="entry" placeholder="Escribe un recordatorio o concepto clave..."></textarea>
+       <div style="display:flex;gap:8px;margin-top:10px">
+         <button type="button" class="swatch selected" data-sbg="#fef08a" style="background:#fef08a" onclick="this.parentNode.querySelectorAll('button').forEach(b=>b.classList.remove('selected'));this.classList.add('selected')"></button>
+         <button type="button" class="swatch" data-sbg="#bae6fd" style="background:#bae6fd" onclick="this.parentNode.querySelectorAll('button').forEach(b=>b.classList.remove('selected'));this.classList.add('selected')"></button>
+         <button type="button" class="swatch" data-sbg="#bbf7d0" style="background:#bbf7d0" onclick="this.parentNode.querySelectorAll('button').forEach(b=>b.classList.remove('selected'));this.classList.add('selected')"></button>
+         <button type="button" class="swatch" data-sbg="#fbcfe8" style="background:#fbcfe8" onclick="this.parentNode.querySelectorAll('button').forEach(b=>b.classList.remove('selected'));this.classList.add('selected')"></button>
+       </div>`,
+      () => {
+        const v = $('entry').value.trim();
+        const selBg = document.querySelector('#modalBody .selected')?.dataset.sbg || '#fef08a';
+        if (v) {
+          snapshot();
+          const { w, h } = dims();
+          const c = world({ x: w / 2 - 90, y: h / 2 - 75 });
+          state().items.push({ type: 'sticky', x: c.x, y: c.y, w: 190, h: 155, text: v, bg: selBg, size: 16 });
+          render();
+        }
+      }
+    );
+    setTimeout(() => $('entry')?.focus(), 50);
+  };
+
+  // Selector de formato matemático: LaTeX o KaTeX
+  function openFormulaEditor(engine) {
+    const syms = ['\\pi', '\\theta', '\\alpha', '\\beta', '\\sum_{i=1}^{n}', '\\int_{a}^{b}', '\\sqrt{x}', '\\frac{a}{b}', '\\infty', '\\neq', '\\leq', '\\geq'];
+    const symButtons = syms.map(s => `<button type="button" class="sym-btn" data-sym="${s}">${s.replace(/\\/g, '')}</button>`).join('');
+    openModal(
+      `Fórmula Matemática — ${engine}`,
+      `<p class="tiny" style="margin-top:0">Escribe la expresión matemática usando sintaxis ${engine}. La vista previa se actualizará mientras escribes.</p>
+       <div class="symbol-bar">${symButtons}</div>
+       <input type="text" id="entry" placeholder="\\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}" autocomplete="off">
+       <div style="margin-top:12px">
+         <div class="tiny" style="font-weight:700;margin-bottom:6px">VISTA PREVIA EN LA PIZARRA</div>
+         <div id="mathLivePreview" style="min-height:88px;padding:18px 12px;border:1px solid var(--border);border-radius:12px;background:var(--surface);display:flex;align-items:center;justify-content:center;overflow-x:auto;color:var(--text);font-size:25px">
+           <span class="tiny" style="font-size:13px">Tu fórmula aparecerá aquí…</span>
+         </div>
+         <div class="tiny" style="margin-top:6px">Así se verá al insertarla en la pizarra.</div>
+       </div>`,
+      () => {
+        const v = $('entry').value.trim();
+        if (!v) return;
+        const { w, h } = dims();
+        const center = world({ x: w / 2 - 110, y: h / 2 - 35 });
+        // KaTeX es el motor de renderizado disponible en esta pizarra;
+        // ambas opciones aceptan expresiones con sintaxis LaTeX.
+        renderLatexToImage(v, color, img => {
+          snapshot();
+          if (img) {
+            state().items.push({ type: 'latex', x: center.x, y: center.y, w: 280, h: 75, text: v, color, img, src: img.src, mathEngine: engine });
+          } else {
+            state().items.push({ type: 'latex', x: center.x, y: center.y, text: v, color, size: 30, mathEngine: engine });
+          }
+          render();
+        });
+      }
+    );
+    const updateMathPreview = () => {
+      const inp = $('entry');
+      const preview = $('mathLivePreview');
+      if (!inp || !preview) return;
+      const value = inp.value.trim();
+      if (!value) {
+        preview.innerHTML = '<span class="tiny" style="font-size:13px">Tu fórmula aparecerá aquí…</span>';
+        return;
+      }
+      if (window.katex) {
+        try {
+          preview.innerHTML = window.katex.renderToString(value, {
+            throwOnError: false,
+            displayMode: true,
+            strict: "ignore"
+          });
+        } catch (err) {
+          preview.textContent = value;
+        }
+      } else {
+        preview.textContent = value;
+      }
+    };
+    $('entry').addEventListener('input', updateMathPreview);
+    document.querySelectorAll('.sym-btn').forEach(btn => {
+      btn.onclick = () => {
+        const inp = $('entry');
+        inp.value += (inp.value ? ' ' : '') + btn.dataset.sym;
+        inp.dispatchEvent(new Event('input'));
+        inp.focus();
+      };
+    });
+    updateMathPreview();
+    setTimeout(() => $('entry')?.focus(), 50);
+  }
+
+  function openMathFormatMenu() {
+    openModal(
+      'Formatos matemáticos',
+      `<p class="tiny" style="margin-top:0">Selecciona el formato que deseas utilizar:</p>
+       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+         <button type="button" id="chooseLatex" class="btn-primary" style="padding:13px">LaTeX</button>
+         <button type="button" id="chooseKatex" class="btn-primary" style="padding:13px">KaTeX</button>
+       </div>`,
+      null
+    );
+    $('confirmModal').style.display = 'none';
+    $('chooseLatex').onclick = () => {
+      $('confirmModal').style.display = '';
+      closeModal();
+      openFormulaEditor('LaTeX');
+    };
+    $('chooseKatex').onclick = () => {
+      $('confirmModal').style.display = '';
+      closeModal();
+      openFormulaEditor('KaTeX');
+    };
+  }
+
+  $('mathFormatBtn').onclick = openMathFormatMenu;
+  $('latexBtn').onclick = openMathFormatMenu;
+
+  // Subir Imagen
+  $('imageBtn').onclick = () => $('imageInput').click();
+  $('imageInput').onchange = e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, 460 / img.width, 360 / img.height);
+        const { w, h } = dims();
+        const center = world({ x: w / 2 - (img.width * scale) / 2, y: h / 2 - (img.height * scale) / 2 });
+        snapshot();
+        state().items.push({ type: 'image', x: center.x, y: center.y, w: img.width * scale, h: img.height * scale, img, src: ev.target.result });
+        render();
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  // Exportar PNG y PDF
+  $('exportPngBtn').onclick = () => {
+    const prevSel = selected;
+    selected = null;
+    render();
+    const link = document.createElement('a');
+    link.download = `zenit-pizarra-pag-${page + 1}.png`;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+    selected = prevSel;
+    render();
+  };
+
+  $('exportPdfBtn').onclick = () => {
+    if (!window.jspdf) return;
+    const { jsPDF } = window.jspdf;
+    const { w, h } = dims();
+    const pdf = new jsPDF({ orientation: w >= h ? 'landscape' : 'portrait', unit: 'px', format: [w, h] });
+    const origPage = page;
+    const prevSel = selected;
+    selected = null;
+
+    pages.forEach((_, idx) => {
+      page = idx;
+      render();
+      if (idx > 0) pdf.addPage([w, h], w >= h ? 'landscape' : 'portrait');
+      pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, w, h);
+    });
+
+    page = origPage;
+    selected = prevSel;
+    render();
+    pdf.save('zenit-presentacion.pdf');
+  };
+
+  // Páginas / Diapositivas
+  function pageUI() {
+    $('pageCount').textContent = `${page + 1} / ${pages.length}`;
+    $('prevPage').disabled = page === 0;
+    $('nextPage').disabled = page === pages.length - 1;
+    $('deletePage').disabled = pages.length === 1;
+    selected = null;
+    render();
+  }
+  $('prevPage').onclick = () => { if (page > 0) page--; pageUI(); };
+  $('nextPage').onclick = () => { if (page < pages.length - 1) page++; pageUI(); };
+  $('addPage').onclick = () => {
+    if (pages.length >= 25) return;
+    pages.splice(page + 1, 0, { items: [] });
+    page++;
+    snapshot();
+    pageUI();
+  };
+  $('deletePage').onclick = () => {
+    if (pages.length === 1) return;
+    openModal('Eliminar diapositiva', '<p class="tiny">¿Deseas eliminar esta diapositiva y todo su contenido?</p>', () => {
+      snapshot();
+      pages.splice(page, 1);
+      page = Math.max(0, page - 1);
+      pageUI();
+    });
+  };
+
+  $('clearBtn').onclick = () => {
+    openModal('Limpiar pizarra', '<p class="tiny">¿Borrar todos los trazos de esta diapositiva? Puedes deshacerlo luego.</p>', () => {
+      snapshot();
+      state().items = [];
+      selected = null;
+      render();
+    });
+  };
+
+  function restorePages(jsonStr) {
+    const parsed = JSON.parse(jsonStr);
+    pages = parsed.map(pg => ({
+      items: pg.items.map(o => {
+        if ((o.type === 'image' || o.type === 'latex') && o.src) {
+          const img = new Image();
+          img.src = o.src;
+          img.onload = render;
+          o.img = img;
+        }
+        return o;
+      })
+    }));
+  }
+
+  $('undoBtn').onclick = () => {
+    if (!undoStack.length) return;
+    redoStack.push(serializePages());
+    restorePages(undoStack.pop());
+    page = Math.min(page, pages.length - 1);
+    pageUI();
+    updateHistory();
+    autoSave();
+  };
+
+  $('redoBtn').onclick = () => {
+    if (!redoStack.length) return;
+    undoStack.push(serializePages());
+    restorePages(redoStack.pop());
+    page = Math.min(page, pages.length - 1);
+    pageUI();
+    updateHistory();
+    autoSave();
+  };
+
+  $('zoomIn').onclick = () => { zoom = Math.min(5, zoom * 1.2); render(); };
+  $('zoomOut').onclick = () => { zoom = Math.max(0.2, zoom / 1.2); render(); };
+  $('zoomReset').onclick = () => {
+    zoom = 1;
+    if (showAxes) {
+      const { w, h } = dims();
+      offset = { x: w / 2, y: h / 2 };
+    } else {
+      offset = { x: 0, y: 0 };
+    }
+    render();
+  };
+
+  // Atajos de teclado (incluyendo Ctrl+D para duplicar y Esc para salir de presentación)
+  window.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && document.body.classList.contains('presentation-mode')) {
+      document.body.classList.remove('presentation-mode');
+      return;
+    }
+    if ($('modal').style.display === 'flex') return;
+
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); $('undoBtn').click(); }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); $('redoBtn').click(); }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd' && selected) {
+      e.preventDefault();
+      snapshot();
+      const copy = JSON.parse(JSON.stringify({ ...selected, img: undefined }));
+      if (selected.img) copy.img = selected.img;
+      moveItem(copy, 24 / zoom, 24 / zoom);
+      state().items.push(copy);
+      selected = copy;
+      render();
+    }
+    if ((e.key === 'Delete' || e.key === 'Backspace') && selected) {
+      snapshot();
+      const idx = state().items.indexOf(selected);
+      if (idx >= 0) state().items.splice(idx, 1);
+      selected = null;
+      render();
+    }
+    if (e.key === 'p' || e.key === 'P') setTool('pen');
+    if (e.key === 'h' || e.key === 'H') setTool('highlighter');
+    if (e.key === 'l' || e.key === 'L') setTool('laser');
+    if (e.key === 'e' || e.key === 'E') setTool('eraser');
+    if (e.key === 'v' || e.key === 'V') setTool('select');
+  });
+
+  loadAutoSave();
+  pageUI();
+  resize();
+  updateHistory();
+})();
+</script>
+</body>
+</html>
